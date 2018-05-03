@@ -92,6 +92,19 @@ These are defined in the .yml, killing and restarting containers and not allowin
         failureThreshold: 3
 ```
 
+Another example would be using a command from an application inside the container itself, such as:
+
+```yaml
+ livenessProbe:
+   exec:
+     command:
+     - /usr/bin/mongo
+     - --eval
+     - db.serverStatus()
+   initialDelaySeconds: 10
+   timeoutSeconds: 10
+   ```
+
 ### Removing a pod
 
 Note that there is a 30 second grace period when deleting a pod *after it stops recieving traffic* i.e. if there is an open HTTPS connection the pod will not be removed.
