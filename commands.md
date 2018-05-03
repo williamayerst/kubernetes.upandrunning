@@ -55,6 +55,9 @@ Containers should be grouped into a pod if they need to land on the same host (i
 
 See the Objects header above for using declarative configuration. 
 
+`$ kubectl edit deployment/alpaca-prod` will edit an existing deployment .yml file
+
+
 #### Resource Utilisation
 
 Resources are requested per container, not per Pod:
@@ -110,7 +113,7 @@ There are four types of storage:
 * host (for direct access to /dev, etc.)
 * remote volumes
 
-These are defined in the volumes: section of the .yml file and are consumed by individual containers.
+These are defined either directly in the volumes: section of the .yml file or as separate volume, and volume-claim objects. Decoupling the volume from the pod definition is a good idea, because then you can change the config dynamically. Dynamic volumes can be provisioned by configuring `storage-class`  objects, and then referring to those - Kubernetes will then create your volume upon request in a service such as Azure.
 
 ## Tracking Usage
 
@@ -118,16 +121,9 @@ These are defined in the volumes: section of the .yml file and are consumed by i
 
 #### Adding
 
-Deployments can be labelled:
+Deployments can be labelled:m`kubectl run alpaca-prod --image=gcr.io/kuar-demo/kuard-amd64:1 --replicas=2 --labels="ver=1,app=alpaca,env=prod"`mor post-hoc `kubectl label deployments alpaca-test "canary=true"` - either way *it doesn't cascade!*
 
-```bash
-kubectl run alpaca-prod --image=gcr.io/kuar-demo/kuard-amd64:1 --replicas=2 --labels="ver=1,app=alpaca,env=prod"
-kubectl run alpaca-test --image=gcr.io/kuar-demo/kuard-amd64:2 --replicas=1 --labels="ver=2,app=alpaca,env=test"
-kubectl run bandicoot-prod --image=gcr.io/kuar-demo/kuard-amd64:2 --replicas=2 --labels="ver=2,app=bandicoot,env=prod"
-kubectl run bandicoot-staging --image=gcr.io/kuar-demo/kuard-amd64:2 --replicas=1 --labels="ver=2,app=bandicoot,env=staging"
-```
-
-or post-hoc `kubectl label deployments alpaca-test "canary=true"` - either way *it only affects deployments!* 
+or nodes `kubectl label nodes k0-default-pool-35609c18-z7tb ssd=true`
 
 #### Selecting Pods
 
@@ -155,8 +151,90 @@ metadata:
     example.com/icon-url: "https://example.com/icon.png"
 ```
 
-## Exposing Deployments
+## Services
 
-`kubectl expose deployment alpaca-prod` will expose an internal deployment
+`kubectl expose deployment alpaca-prod` will create a service out of a deployment dy default internal-only A record and clustered IP. You can specify `--type=nodeport` to allow NATing into and out of your cluster to the service. This can also be achieved by changing the type in the object .yml file.  
+
+It's also possible to define a service.yml file, which will expose a pod (using selectors).
 
 An internal DNS record of a pod in a kubernetes cluster will look like this `alpaca-prod.default.svc.cluster.local` (pod name, namespace, service, cluster name)
+
+To observe the containers inside a pod that are participating in the service, use `kubectl get endpoints alpaca-prod --watch`
+
+You can also define an external service (spec.type: externalname, spec.externalname: <DNS>) which replaces the A-record and IP with a CNAME, so your containers think they are talking to a local service, but are infact going out to an external one. `external-ip-database` does something similar, but where you specify an IP rather than a name to create the CNAME entry for. *no healthcheckin!*
+
+
+### ReplicaSets
+
+ReplicaSets are objects which manage Pods of a given selector to the desired count/health. They use the `rs` command, i.e. `kubectl describe rs kuard`. To identify if a pod is managed by a replicaset, you can describe it to YAML and grep the kind/name from ownerreferences.
+
+Deleting a ReplicaSet will automatically remove the pods unless `--cascade=false` is applied to the command.
+
+#### Horizontal Pod Autoscaling (for CPU)
+
+`kubectl autoscale rs kuard --min=2 --max=5 --cpu-percent=80` will automatically scale a pod based on when the allocated CPU goes over 80%. it is required that the kube-system namespace has a pod named heapster for this to work. !Don't mix manual and automatic replica management!
+
+### DaemonSets
+
+Daemonsets will automatically add a given pod to every node in the cluster
+
+### StatefulSets
+
+These are created and destroy sequentially, and will have a multiple DNS entries in the kubernetes DNS service instead of a clustered IP. See `.\statefulset` folder. One can set up volumeMounts persistent storage, but one must define a TEMPLATE for the claim, such as:
+
+```yaml
+  volumeClaimTemplates:
+  - metadata:
+      name: database
+      annotations:
+        volume.alpha.kubernetes.io/storage-class: anything
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 100Gi
+```
+
+## Jobs
+
+Jobs are job-and-done deployments which do not automatically keep repopulating, i.e. database migration, work queue, etc.
+
+`kubectl run -i oneshot --image=gcr.io/kuar-demo/kuard-amd64:1 --restart=OnFailure -- --keygen-enable --keygen-exit-on-complete --keygen-num-to-gen 10`
+
+This can be defined as a YML file, but one will need to review the logs (rather than using an interactive terminal as in the above example to see the output)
+
+Jobs can have parallelism and concurrency settings, and can be set to either terminate in place or be re-run when failed.
+
+## ConfigMaps
+
+To get data into a kubernetes Pod, ConfigMaps are a great tool. They are key-value pairs and/or text files that are ingested into a .yml object in the cluster. They can be used to define environment variables in a container, to be mounted as files inside the container, or in the command line for the container creation itself. See `./configmap/my-config.txt` for examples
+
+Like many other objects it can be edited live: `kubectl edit configmap my-config`
+
+## Secrets
+
+K8S has native secret management, as so: `kubectl create secret generic kuard-tls --from-file=kuard.crt --from-file=kuard.key` and `kubectl describe secrets kuard-tls`. These are mounted like ConfigMaps as 'volumes' to paths inside containers in pods under the spec:
+
+```yaml
+  volumes:
+    - name: tls-certs
+      secret:
+        secretName: kuard-tls
+```
+
+A shortcut to replace file-based secrets is like so `kubectl create secret generic kuard-tls --from-file=kuard.crt --from-file=kuard.key --dry-run -o yaml | kubectl replace -f -`
+
+Private Docker Registries have a special secret, `kubectl create secret docker-registry` to create, and spec.imagePullSecrets to consume from within the object .yml.
+
+## Deployments
+
+Pods manage contaniers, Replicasets manage Pods, Deployments manage ReplicaSets. 
+
+A 'run' command creates a label on the pod of "run=ZZZ", which means it gets included in an auto-created ReplicaSet (which has a unique auto-created name as a label itself), and also into an auto-created Deployment. The Deployment as the 'highest order' object, controls the scale (for example)
+
+To save a deployment down to a file, run `kubectl get deployments nginx --export -o yaml > nginx-deployment.yaml` and then you can replace the extant deployment with one defined from that file using `kubectl replace -f nginx-deployment.yaml --save-config`
+
+Changes to a deployment yaml file (such as a new image, or change-cause being added) will cause a 'rollout', a staged change of the entire deployment/replicaset/pod - `kubectl get replicasets -o wide` is useful, as is `kubectl rollout history deployment ZZZ` or `kubectl rollout undo deployment ZZZ`
+
+A recreate strategy will blow everything away by updating the replicaset, a rolling update will roll out the changes. You really need to use readiness checks with a rolling updates to manage maxunavailble/etc. There are default parameters for the minimum time per container to be waited for, and for a time-out between events in a deployment.
+
