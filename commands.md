@@ -10,7 +10,7 @@ Minikube is a single node kubernetes cluster used for testing.
 
 ## KubeCTL
 
-`kubectl proxy` launches API UI
+`kubectl proxy` launches a local proxy into the cluster, from there you can access the API, or resources within it, i.e. ` http://localhost:8001/api/v1/namespaces/default/services/ghost/proxy/`
 
 ### Config file with defaults:
 
