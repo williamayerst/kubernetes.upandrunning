@@ -6,7 +6,10 @@ Minikube is a single node kubernetes cluster used for testing.
 
 * `minikube start` launches the mini-kubernetes environment on a local machine. This must be run from the scame location your .minikube folder (i.e. home dir/drive) is located.
 * `minikube dashboard` launches Kubernetes UI
+* `minikube addons enable ingress` sets up an ingress controller (nginx) locally for use.
 * `curl $(minikube service ZZZ --url)` will curl the URL of the service ZZZ from your host machine
+
+*I have found that pulling images from remote repos into kubernetes that is deployed via minikube will often fail unless minikube is running in an adminstrative Powershell window!*
 
 ## KubeCtl
 
@@ -159,7 +162,7 @@ Deleting a ReplicaSet will automatically remove the pods unless `--cascade=false
 
 ### DaemonSets
 
-Daemonsets will automatically add a given pod to every node in the cluster
+Daemonsets will automatically add a given pod to every node in the cluster, for example for some internal monitoring services.
 
 ### StatefulSets
 
