@@ -1,0 +1,37 @@
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  replicas: 3
+  serviceName: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - command: [sh, -c, source /redis-config/init.sh ] # this is the command to run the init.sh in the container
+        image: redis:3.2.7-alpine
+        name: redis
+        ports:
+        - containerPort: 6379
+          name: redis
+        volumeMounts:
+        - mountPath: /redis-config
+          name: config
+        - mountPath: /redis-data
+          name: data
+      - command: [sh, -c, source /redis-config/sentinel.sh] # this is the command to run the init.sh in the container
+        image: redis:3.2.7-alpine
+        name: sentinel
+        volumeMounts:
+        - mountPath: /redis-config
+          name: config
+      volumes:
+      - configMap: # this generic configmap is mounted, and the specific files are referenced above
+          defaultMode: 420
+          name: redis-config
+        name: config
+      - emptyDir:
+        name: data
